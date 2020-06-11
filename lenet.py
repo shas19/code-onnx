@@ -50,12 +50,22 @@ def save_model(graph, model_name):
 
 	onnx.save(model, 'models/' + model_name + '.onnx')
 
-def add_param(name, shape, param_list, type=TensorProto.FLOAT, value=None):
+def add_param(name, shape, param_list, type=TensorProto.FLOAT, value=None, permute=None):
 	cnt = 1
 	for val in shape: cnt*=val
 
 	if value==None:
-		value = np.load('models/'+ model_name +'/'+ name + '.npy').reshape(cnt).tolist()
+		value = np.load('models/'+ model_name +'/'+ name + '.npy')
+		
+		# reorder the input param e.g. in case of conv filter
+		if permute!= None:
+			# [3, 2, 0, 1] for filter
+			stored_shape = [0,0,0,0]
+			for i in range(len(shape)): stored_shape[permute[i]] = shape[i]
+			value = value.reshape(stored_shape)
+			value = np.transpose(value, permute)
+
+		value = value.reshape(cnt).tolist()
 	
 	param = helper.make_tensor(name, type, shape, value)
 	param_list.append(param)
@@ -63,15 +73,15 @@ def add_param(name, shape, param_list, type=TensorProto.FLOAT, value=None):
 
 # lenet on cifar-10
 X = helper.make_tensor_value_info('X', TensorProto.FLOAT, [3072, 1])
-out  = helper.make_tensor_value_info('out', TensorProto.INT64, [1,10])
+out  = helper.make_tensor_value_info('out', TensorProto.INT64, [1])
 
 param_list = []
 
 #[5,5,3,6] spatial_filter_shape + [in_channels, out_channels].
 # [CO CI H W]
-add_param('Wc1', [6,3,5,5], param_list)
+add_param('Wc1', [6,3,5,5], param_list, permute=(3, 2, 0, 1))
 # [5,5,6,12]
-add_param('Wc2', [12,6,5,5], param_list)
+add_param('Wc2', [12,6,5,5], param_list, permute=(3, 2, 0, 1))
 add_param('Wf1', [768,120], param_list)
 add_param('Wf2', [120,84], param_list)
 add_param('Wf3', [84,10], param_list)
@@ -107,7 +117,7 @@ Hf2_mul = helper.make_node("Gemm", ['Hf1', 'Wf2', 'Bf2'], ['Hf2_mul'])
 Hf2 = helper.make_node("Relu", ["Hf2_mul"], ["Hf2"]) 
 
 Hf3 = helper.make_node("Gemm", ['Hf2', 'Wf3', 'Bf3'], ['Hf3'])
-out_node = helper.make_node("ArgMax", ['Hf3'], ['out'])
+out_node = helper.make_node("ArgMax", ['Hf3'], ['out'], axis=1, keepdims=0)
 
 node_list = [X2, Hc1_conv, Hc1, Hc1P, Hc2_conv, Hc2, Hc2P, Hc2PP, Hf1_mul, Hf1, Hf2_mul, Hf2, Hf3, out_node]
 
